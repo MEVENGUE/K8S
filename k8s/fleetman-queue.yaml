@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fleetman-queue
+  namespace: fleetman
+  labels:
+    app: fleetman-queue
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fleetman-queue
+  template:
+    metadata:
+      labels:
+        app: fleetman-queue
+    spec:
+      containers:
+        - name: queue
+          image: supinfo4kube/queue:1.0.1
+          ports:
+            - containerPort: 8161
+              name: console
+            - containerPort: 61616
+              name: broker
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleetman-queue
+  namespace: fleetman
+  labels:
+    app: fleetman-queue
+spec:
+  type: ClusterIP
+  selector:
+    app: fleetman-queue
+  ports:
+    - name: console
+      port: 8161
+      targetPort: console
+    - name: broker
+      port: 61616
+      targetPort: broker
+
