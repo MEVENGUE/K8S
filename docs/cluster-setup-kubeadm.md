@@ -2,6 +2,13 @@
 
 Ce document résume une procédure standard avec kubeadm sur des machines Ubuntu 22.04 (ou équivalent). Adaptez selon votre OS/hyperviseur/cloud.
 
+> Utilisation depuis Windows (PowerShell) – résumé rapide
+> - Installez kubectl: `choco install kubernetes-cli -y` (ou `winget install Kubernetes.kubectl`)
+> - Activez le client OpenSSH Windows pour utiliser `ssh`/`scp` vers vos VM Linux
+> - Exécutez les commandes Linux ci‑dessous par SSH depuis votre PC Windows
+> - Ouvrez la webapp: `Start-Process "http://<IP_worker>:30080"`
+> - Fichier hosts si besoin d’un alias: `C:\\Windows\\System32\\drivers\\etc\\hosts`
+
 ## Prérequis systèmes (à exécuter sur tous les nœuds)
 - 2 vCPU, 4+ Go RAM par nœud (min recommandé)
 - Désactiver swap: `sudo swapoff -a` et supprimer toute entrée swap de `/etc/fstab`
@@ -110,4 +117,53 @@ Suivez le guide `README-fleetman-deploy.md` à la racine du dépôt.
 - Ouvrir le NodePort 30080 sur les workers si un firewall est actif
 - Pour accéder à l'app: `http://<IP_worker>:30080`
 - En cas d'absence de positions, redémarrer `fleetman-queue` comme indiqué dans le README
+
+## Annexes – Windows 10/11 (PowerShell)
+
+### Installer kubectl
+```
+choco install kubernetes-cli -y
+# ou
+winget install Kubernetes.kubectl
+kubectl version --client
+```
+
+### Se connecter aux nœuds Linux
+```
+ssh ubuntu@<ip-master>
+ssh ubuntu@<ip-worker1>
+ssh ubuntu@<ip-worker2>
+```
+
+### Copier un fichier avec scp
+```
+scp .\kube-flannel.yml ubuntu@<ip-master>:/home/ubuntu/
+```
+
+### Utiliser le kubeconfig localement
+Sur le master Linux après `kubeadm init`:
+```
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+```
+Puis sur Windows (PowerShell):
+```
+scp ubuntu@<ip-master>:/home/ubuntu/.kube/config $env:USERPROFILE\.kube\config
+$env:KUBECONFIG = "$env:USERPROFILE\.kube\config"
+kubectl get nodes
+```
+
+### Accéder à la webapp depuis Windows
+```
+Start-Process "http://<IP_worker>:30080"
+```
+
+### Dépannage rapide (PowerShell)
+```
+kubectl -n fleetman get pods,svc
+kubectl -n fleetman rollout restart deployment/fleetman-queue
+Invoke-WebRequest -UseBasicParsing http://<IP_worker>:30080/api/vehicles
+Invoke-WebRequest -UseBasicParsing "http://<IP_worker>:30080/api/history/City%20Truck"
+```
 
