@@ -21,6 +21,14 @@ spec:
           ports:
             - containerPort: 80
               name: http
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: fleetman-webapp-nginx
 ---
 apiVersion: v1
 kind: Service

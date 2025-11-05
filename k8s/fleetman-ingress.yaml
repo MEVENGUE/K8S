@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fleetman-ingress
+  namespace: fleetman
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+    - host: fleetman.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: fleetman-api-gateway
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fleetman-webapp
+                port:
+                  number: 80
+
