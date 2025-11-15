@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trucks-positions-adapter
+  namespace: trucks
+  labels:
+    app: trucks-positions-adapter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trucks-positions-adapter
+  template:
+    metadata:
+      labels:
+        app: trucks-positions-adapter
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+              name: http
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: trucks-positions-adapter-nginx
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trucks-positions-adapter-nginx
+  namespace: trucks
+data:
+  nginx.conf: |
+    events {
+      worker_connections 1024;
+    }
+    
+    http {
+      # Resolver pour la résolution DNS dynamique (IP du service DNS)
+      resolver 10.96.0.10 valid=10s;
+      
+      server {
+        listen 80;
+        
+        # Réécrire toutes les requêtes vers le position-tracker
+        # Utilisation d'une variable pour forcer la résolution DNS au runtime
+        location / {
+          set $backend "http://trucks-position-tracker.trucks.svc.cluster.local:8080";
+          proxy_pass $backend;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+          proxy_http_version 1.1;
+          proxy_set_header Connection "";
+          proxy_connect_timeout 60s;
+          proxy_send_timeout 60s;
+          proxy_read_timeout 60s;
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trucks-positions-adapter
+  namespace: trucks
+  labels:
+    app: trucks-positions-adapter
+spec:
+  type: ClusterIP
+  selector:
+    app: trucks-positions-adapter
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+

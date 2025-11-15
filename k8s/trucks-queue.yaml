@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trucks-queue
+  namespace: trucks
+  labels:
+    app: trucks-queue
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trucks-queue
+  template:
+    metadata:
+      labels:
+        app: trucks-queue
+    spec:
+      containers:
+        - name: app
+          image: supinfo4kube/queue:1.1.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 61616
+              name: amqp
+            - containerPort: 8161
+              name: ui
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          readinessProbe:
+            tcpSocket:
+              port: 61616
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: 61616
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trucks-queue
+  namespace: trucks
+  labels:
+    app: trucks-queue
+spec:
+  type: ClusterIP
+  selector:
+    app: trucks-queue
+  ports:
+    - name: amqp
+      port: 61616
+      targetPort: amqp
+    - name: ui
+      port: 8161
+      targetPort: ui
+
