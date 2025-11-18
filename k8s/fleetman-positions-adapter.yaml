@@ -1,20 +1,27 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: trucks-positions-adapter
-  namespace: trucks
+  name: fleetman-positions-adapter
+  namespace: fleetman
   labels:
-    app: trucks-positions-adapter
+    app: fleetman-positions-adapter
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: trucks-positions-adapter
+      app: fleetman-positions-adapter
   template:
     metadata:
       labels:
-        app: trucks-positions-adapter
+        app: fleetman-positions-adapter
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
       containers:
         - name: nginx
           image: nginx:alpine
@@ -35,13 +42,13 @@ spec:
       volumes:
         - name: nginx-config
           configMap:
-            name: trucks-positions-adapter-nginx
+            name: fleetman-positions-adapter-nginx
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: trucks-positions-adapter-nginx
-  namespace: trucks
+  name: fleetman-positions-adapter-nginx
+  namespace: fleetman
 data:
   nginx.conf: |
     events {
@@ -58,7 +65,7 @@ data:
         # Réécrire toutes les requêtes vers le position-tracker
         # Utilisation d'une variable pour forcer la résolution DNS au runtime
         location / {
-          set $backend "http://trucks-position-tracker.trucks.svc.cluster.local:8080";
+          set $backend "http://fleetman-position-tracker.fleetman.svc.cluster.local:8080";
           proxy_pass $backend;
           proxy_set_header Host $host;
           proxy_set_header X-Real-IP $remote_addr;
@@ -76,14 +83,14 @@ data:
 apiVersion: v1
 kind: Service
 metadata:
-  name: trucks-positions-adapter
-  namespace: trucks
+  name: fleetman-positions-adapter
+  namespace: fleetman
   labels:
-    app: trucks-positions-adapter
+    app: fleetman-positions-adapter
 spec:
   type: ClusterIP
   selector:
-    app: trucks-positions-adapter
+    app: fleetman-positions-adapter
   ports:
     - name: http
       port: 80

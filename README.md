@@ -1,6 +1,12 @@
-# Déploiement de l'application Trucks sur Kubernetes
+# Déploiement de l'application Fleetman sur Kubernetes
 
-Ce projet contient les manifests Kubernetes pour déployer une application microservices distribuée "Trucks" qui simule et suit la position de véhicules en temps réel.
+Ce projet contient les manifests Kubernetes pour déployer une application microservices distribuée "Fleetman" qui simule et suit la position de véhicules en temps réel.
+
+## ⚠️ Note importante
+
+**Convention de nommage** : Le barème du mini-projet mentionne "trucks-" mais le sujet utilise "fleetman-" (comme dans le fichier Docker Compose fourni). Les manifests de ce projet utilisent la convention "fleetman-" qui correspond au Docker Compose fourni dans l'énoncé.
+
+Nous avons choisi de suivre la convention "fleetman-" du Docker Compose fourni, qui est cohérente avec le sujet du mini-projet pour la soutenance.
 
 ## 📋 Table des matières
 
@@ -17,21 +23,21 @@ Ce projet contient les manifests Kubernetes pour déployer une application micro
 
 ## 🏗️ Architecture de l'application
 
-L'application Trucks est composée de 6 microservices qui communiquent entre eux :
+L'application Fleetman est composée de 8 microservices qui communiquent entre eux :
 
 ```
 ┌─────────────────┐
-│  trucks-web-app │ (Interface utilisateur - NodePort 30081)
+│  fleetman-web-app │ (Interface utilisateur - NodePort 30080)
+└────────┬────────┘
+         │ HTTP /api/*
+         ▼
+┌─────────────────┐
+│fleetman-api-gateway│ (Point d'entrée API - ClusterIP)
 └────────┬────────┘
          │ HTTP
          ▼
 ┌─────────────────┐
-│trucks-api-gateway│ (Point d'entrée API - ClusterIP)
-└────────┬────────┘
-         │ HTTP
-         ▼
-┌─────────────────┐
-│trucks-position-│ (API REST + Consommateur - ClusterIP)
+│fleetman-position-│ (API REST + Consommateur - ClusterIP)
 │    tracker      │
 └────────┬────────┘
          │
@@ -39,15 +45,26 @@ L'application Trucks est composée de 6 microservices qui communiquent entre eux
     │         │
     ▼         ▼
 ┌─────────┐ ┌──────────────┐
-│trucks-  │ │trucks-queue  │ (ActiveMQ - ClusterIP)
+│fleetman-  │ │fleetman-queue  │ (ActiveMQ - ClusterIP)
 │mongodb  │ │              │
-└─────────┘ └──────┬───────┘
-                   │ AMQP
-                   ▼
-         ┌─────────────────┐
-         │trucks-position-  │ (Producteur de messages)
-         │   simulator      │
-         └─────────────────┘
+└────┬────┘ └──────┬───────┘
+     │             │ AMQP
+     │             ▼
+     │    ┌─────────────────┐
+     │    │fleetman-position-  │ (Producteur de messages)
+     │    │   simulator      │
+     │    └─────────────────┘
+     │
+     ▼
+┌─────────────────┐
+│fleetman-history-│ (Service historique - ClusterIP)
+│    service      │
+└─────────────────┘
+
+┌─────────────────┐
+│fleetman-positions│ (Adapter Nginx - ClusterIP)
+│    adapter      │
+└─────────────────┘
 ```
 
 ---
@@ -58,57 +75,100 @@ L'application Trucks est composée de 6 microservices qui communiquent entre eux
 
 | Fichier | Type | Fonction |
 |---------|------|----------|
-| `namespace.yaml` | Namespace | Crée l'espace de noms `trucks` |
-| `trucks-mongodb.yaml` | StatefulSet + Service | Base de données MongoDB avec persistance |
-| `trucks-queue.yaml` | Deployment + Service | Broker de messages ActiveMQ |
-| `trucks-position-simulator.yaml` | Deployment + Service | Simulateur de positions de véhicules |
-| `trucks-position-tracker.yaml` | Deployment + Service | Tracker qui consomme les messages et expose une API |
-| `trucks-api-gateway.yaml` | Deployment + Service | Passerelle API (point d'entrée backend) |
-| `trucks-web-app.yaml` | Deployment + Service | Application web frontend |
-| `trucks-webapp-config.yaml` | ConfigMap | Configuration Nginx pour la webapp (proxy vers API Gateway) |
-| `trucks-ingress.yaml` | Ingress | Expose l'application via Ingress (optionnel, alternative au NodePort) |
+| `namespace.yaml` | Namespace | Crée l'espace de noms `fleetman` |
+| `fleetman-mongodb.yaml` | StatefulSet + Service | Base de données MongoDB avec persistance |
+| `fleetman-queue.yaml` | Deployment + Service | Broker de messages ActiveMQ |
+| `fleetman-position-simulator.yaml` | Deployment + Service | Simulateur de positions de véhicules |
+| `fleetman-position-tracker.yaml` | Deployment + Service | Tracker qui consomme les messages et expose une API |
+| `fleetman-api-gateway.yaml` | Deployment + Service | Passerelle API (point d'entrée backend) |
+| `fleetman-history-service.yaml` | Deployment + Service | Service Python Flask pour l'historique des véhicules |
+| `fleetman-positions-adapter.yaml` | Deployment + Service + ConfigMap | Adapter Nginx pour le Position Tracker |
+| `fleetman-web-app.yaml` | Deployment + Service | Application web frontend |
+| `fleetman-webapp-config.yaml` | ConfigMap | Configuration Nginx pour la webapp (routage vers services backend) |
 
 ---
 
 ## 🔗 Relations entre les composants
 
-### 1. **trucks-mongodb** (Base de données)
+### 1. **fleetman-mongodb** (Base de données)
 - **Type** : StatefulSet (pour persistance)
 - **Service** : Headless Service (`clusterIP: None`)
 - **Utilisé par** :
-  - `trucks-position-tracker` (stocke les positions)
-  - `trucks-api-gateway` (lit les données)
+  - `fleetman-position-tracker` (stocke les positions)
+  - `fleetman-api-gateway` (lit les données)
 
-### 2. **trucks-queue** (Message Broker)
-- **Type** : Deployment
-- **Service** : ClusterIP (ports 61616 AMQP, 8161 UI)
+### 2. **fleetman-queue** (Message Broker)
+- **Type** : Deployment (2 réplicas)
+- **Service** : ClusterIP (ports 61616 OpenWire, 8161 UI)
+- **Image** : `supinfo4kube/queue:1.1.0` (ActiveMQ 5.17.3)
 - **Utilisé par** :
-  - `trucks-position-simulator` (envoie des messages)
-  - `trucks-position-tracker` (consomme les messages)
+  - `fleetman-position-simulator` (envoie des messages via `tcp://fleetman-queue.fleetman.svc.cluster.local:61616`)
+  - `fleetman-position-tracker` (consomme les messages via `tcp://fleetman-queue.fleetman.svc.cluster.local:61616`)
 
-### 3. **trucks-position-simulator** (Producteur)
-- **Type** : Deployment
-- **Dépend de** : `trucks-queue` (via `ACTIVEMQ_URL`)
+### 3. **fleetman-position-simulator** (Producteur)
+- **Type** : Deployment (1 replica)
+- **Image** : `supinfo4kube/position-simulator:1.1.0`
+- **Dépend de** : `fleetman-queue` (via `ACTIVEMQ_URL=tcp://fleetman-queue.fleetman.svc.cluster.local:61616`)
+- **Variables d'environnement** :
+  - `SPRING_PROFILES_ACTIVE=production-microservice`
+  - `ACTIVEMQ_URL`, `SPRING_ACTIVEMQ_BROKER_URL`, `SPRING_JMS_ACTIVEMQ_BROKER_URL` (toutes pointent vers le service DNS Kubernetes)
+  - `VEHICLE_COUNT=12`
+  - `MESSAGE_FREQUENCY_MS=500`
 - **Fonction** : Génère des positions de véhicules et les envoie à la queue
 
-### 4. **trucks-position-tracker** (Consommateur + API)
+### 4. **fleetman-position-tracker** (Consommateur + API)
 - **Type** : Deployment (2 réplicas)
+- **Image** : `supinfo4kube/position-tracker:1.1.0`
 - **Dépend de** :
-  - `trucks-queue` (consomme les messages)
-  - `trucks-mongodb` (stocke les positions)
-- **Utilisé par** : `trucks-api-gateway`
+  - `fleetman-queue` (consomme les messages via `tcp://fleetman-queue.fleetman.svc.cluster.local:61616`)
+  - `fleetman-mongodb` (stocke les positions via `mongodb://fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local:27017/fleetman`)
+- **Variables d'environnement** :
+  - `SPRING_PROFILES_ACTIVE=production-microservice`
+  - `SPRING_DATA_MONGODB_URI`, `SPRING_DATA_MONGODB_DATABASE=fleetman`
+  - `SPRING_JMS_LISTENER_AUTO_STARTUP=true`
+  - `SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING=true`
+- **API REST** : Expose `/vehicles/` sur le port 8080
+- **Utilisé par** : `fleetman-api-gateway`, `fleetman-web-app` (via Nginx)
 
-### 5. **trucks-api-gateway** (Passerelle API)
+### 5. **fleetman-api-gateway** (Passerelle API)
 - **Type** : Deployment (2 réplicas)
+- **Image** : `supinfo4kube/api-gateway:1.1.0`
 - **Dépend de** :
-  - `trucks-position-tracker` (appelle l'API)
-  - `trucks-mongodb` (accès direct à la base)
-- **Utilisé par** : `trucks-web-app`
+  - `fleetman-position-tracker` (appelle l'API via `http://fleetman-position-tracker.fleetman.svc.cluster.local:8080`)
+  - `fleetman-mongodb` (accès direct via `mongodb://fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local:27017/fleetman`)
+- **Variables d'environnement** :
+  - `SPRING_PROFILES_ACTIVE=production-microservice`
+  - `FLEETMAN_POSITION_TRACKER_URL`, `SPRING_DATA_MONGODB_URI`, `SPRING_DATA_MONGODB_DATABASE`
+  - `SPRING_CLOUD_GATEWAY_ROUTES_*` (configuration des routes)
+  - `SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING=true`
+- **Utilisé par** : `fleetman-web-app` (pour certaines routes `/api/`)
 
-### 6. **trucks-web-app** (Frontend)
+### 6. **fleetman-history-service** (Service historique)
+- **Type** : Deployment (1 replica)
+- **Image** : `python:3.9-slim`
+- **Dépend de** : `fleetman-mongodb` (lit directement la collection `vehiclePosition`)
+- **Fonction** : Service Python Flask qui expose `/api/vehicles/{name}/history` pour récupérer l'historique des positions d'un véhicule
+- **Variables d'environnement** :
+  - `MONGODB_HOST=fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local`
+  - `MONGODB_PORT=27017`
+  - `MONGODB_DB=fleetman`
+- **Utilisé par** : `fleetman-web-app` (via Nginx pour les routes `/api/vehicles/{id}/history`)
+
+### 7. **fleetman-positions-adapter** (Adapter Nginx)
+- **Type** : Deployment (1 replica) + ConfigMap
+- **Image** : `nginx:alpine`
+- **Fonction** : Adapter Nginx pour le Position Tracker (optionnel, peut être utilisé par l'API Gateway)
+- **Utilisé par** : Potentiellement `fleetman-api-gateway` (selon configuration)
+
+### 8. **fleetman-web-app** (Frontend)
 - **Type** : Deployment (2 réplicas)
-- **Service** : NodePort (port 30081)
-- **Dépend de** : `trucks-api-gateway` (via `API_GATEWAY_URL`)
+- **Image** : `supinfo4kube/web-app:1.1.0`
+- **Service** : NodePort (port 30080)
+- **Dépend de** :
+  - `fleetman-position-tracker` (via Nginx pour `/api/vehicles/`)
+  - `fleetman-history-service` (via Nginx pour `/api/vehicles/{id}/history`)
+  - `fleetman-api-gateway` (via Nginx pour autres routes `/api/`)
+  - `fleetman-webapp-nginx` ConfigMap (configuration Nginx)
 
 ---
 
@@ -128,50 +188,53 @@ Les composants doivent être déployés dans cet ordre pour respecter les dépen
 kubectl apply -f k8s/namespace.yaml
 
 # 2. Déployer MongoDB (base de données - doit être prêt en premier)
-kubectl apply -f k8s/trucks-mongodb.yaml
+kubectl apply -f k8s/fleetman-mongodb.yaml
 
 # 3. Déployer la queue ActiveMQ (nécessaire pour les messages)
-kubectl apply -f k8s/trucks-queue.yaml
+kubectl apply -f k8s/fleetman-queue.yaml
 
 # 4. Déployer le ConfigMap Nginx (nécessaire pour la webapp)
-kubectl apply -f k8s/trucks-webapp-config.yaml
+kubectl apply -f k8s/fleetman-webapp-config.yaml
 
 # 5. Déployer le simulateur (peut démarrer en parallèle)
-kubectl apply -f k8s/trucks-position-simulator.yaml
+kubectl apply -f k8s/fleetman-position-simulator.yaml
 
 # 6. Déployer le tracker (dépend de MongoDB et Queue)
-kubectl apply -f k8s/trucks-position-tracker.yaml
+kubectl apply -f k8s/fleetman-position-tracker.yaml
 
 # 7. Déployer l'API Gateway (dépend du tracker)
-kubectl apply -f k8s/trucks-api-gateway.yaml
+kubectl apply -f k8s/fleetman-api-gateway.yaml
 
-# 8. Déployer l'application web (dépend de l'API Gateway et du ConfigMap)
-kubectl apply -f k8s/trucks-web-app.yaml
+# 8. Déployer le History Service (dépend de MongoDB)
+kubectl apply -f k8s/fleetman-history-service.yaml
 
-# Optionnel : Déployer l'Ingress (alternative au NodePort, nécessite un contrôleur Ingress)
-# kubectl apply -f k8s/trucks-ingress.yaml
+# 9. Déployer le Positions Adapter (optionnel)
+kubectl apply -f k8s/fleetman-positions-adapter.yaml
+
+# 10. Déployer l'application web (dépend de l'API Gateway, Tracker, History Service et du ConfigMap)
+kubectl apply -f k8s/fleetman-web-app.yaml
 ```
 
 ### Vérification du déploiement
 
 ```bash
 # Vérifier tous les pods
-kubectl get pods -n trucks
+kubectl get pods -n fleetman
 
 # Vérifier tous les services
-kubectl get svc -n trucks
+kubectl get svc -n fleetman
 
 # Vérifier les déploiements
-kubectl get deployments -n trucks
+kubectl get deployments -n fleetman
 
 # Vérifier MongoDB (StatefulSet)
-kubectl get statefulset -n trucks
+kubectl get statefulset -n fleetman
 
 # Vérifier les volumes persistants
-kubectl get pvc -n trucks
+kubectl get pvc -n fleetman
 
 # Vue d'ensemble
-kubectl get all -n trucks
+kubectl get all -n fleetman
 ```
 
 ---
@@ -184,11 +247,11 @@ kubectl get all -n trucks
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: trucks
+  name: fleetman
 ```
 
 **Fonction** :
-- Crée un namespace isolé nommé `trucks` pour toutes les ressources de l'application
+- Crée un namespace isolé nommé `fleetman` pour toutes les ressources de l'application
 - Permet d'organiser et d'isoler les ressources Kubernetes
 
 **Pourquoi c'est important** :
@@ -198,7 +261,7 @@ metadata:
 
 ---
 
-### 2. `trucks-mongodb.yaml`
+### 2. `fleetman-mongodb.yaml`
 
 **Contient** : Service Headless + StatefulSet
 
@@ -208,12 +271,12 @@ metadata:
 apiVersion: v1
 kind: Service
 metadata:
-  name: trucks-mongodb
-  namespace: trucks
+  name: fleetman-mongodb
+  namespace: fleetman
 spec:
   clusterIP: None  # Service Headless
   selector:
-    app: trucks-mongodb
+    app: fleetman-mongodb
   ports:
     - name: mongo
       port: 27017
@@ -223,7 +286,7 @@ spec:
 **Fonction** :
 - Service Headless (`clusterIP: None`) : permet un accès direct aux pods MongoDB
 - Expose le port 27017 (port standard MongoDB)
-- Chaque pod MongoDB a un nom DNS stable : `trucks-mongodb-0.trucks-mongodb.trucks.svc.cluster.local`
+- Chaque pod MongoDB a un nom DNS stable : `fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local`
 
 **Pourquoi Headless Service** :
 - Permet la découverte directe des pods pour la réplication MongoDB
@@ -235,9 +298,9 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: trucks-mongodb
+  name: fleetman-mongodb
 spec:
-  serviceName: trucks-mongodb  # Référence au service Headless
+  serviceName: fleetman-mongodb  # Référence au service Headless
   replicas: 1
   volumeClaimTemplates:
     - metadata:
@@ -250,9 +313,10 @@ spec:
 ```
 
 **Fonction** :
-- **StatefulSet** : Gère les pods avec identité stable (nom : `trucks-mongodb-0`)
-- **volumeClaimTemplates** : Crée automatiquement un PVC (`data-trucks-mongodb-0`) de 5Gi pour chaque pod
+- **StatefulSet** : Gère les pods avec identité stable (nom : `fleetman-mongodb-0`)
+- **volumeClaimTemplates** : Crée automatiquement un PVC (`data-fleetman-mongodb-0`) de 5Gi pour chaque pod
 - Le volume est monté dans `/data/db` (répertoire par défaut de MongoDB)
+- **Probes** : `readinessProbe` et `livenessProbe` utilisent `db.adminCommand('ping')` avec timeouts appropriés
 
 **Pourquoi StatefulSet et pas Deployment** :
 - **Persistance** : Les données MongoDB doivent survivre aux redémarrages
@@ -260,12 +324,13 @@ spec:
 - **Ordre de déploiement** : Important pour la réplication MongoDB
 
 **Liens avec autres composants** :
-- Utilisé par `trucks-position-tracker` via `SPRING_DATA_MONGODB_URI=mongodb://trucks-mongodb:27017/trucks`
-- Utilisé par `trucks-api-gateway` via `SPRING_DATA_MONGODB_URI=mongodb://trucks-mongodb:27017/trucks`
+- Utilisé par `fleetman-position-tracker` via `SPRING_DATA_MONGODB_URI=mongodb://fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local:27017/fleetman`
+- Utilisé par `fleetman-api-gateway` via `SPRING_DATA_MONGODB_URI=mongodb://fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local:27017/fleetman`
+- Utilisé par `fleetman-history-service` via `MONGODB_HOST=fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local`
 
 ---
 
-### 3. `trucks-queue.yaml`
+### 3. `fleetman-queue.yaml`
 
 **Contient** : Deployment + Service ClusterIP
 
@@ -275,7 +340,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: trucks-queue
+  name: fleetman-queue
 spec:
   replicas: 1
   template:
@@ -290,7 +355,9 @@ spec:
 
 **Fonction** :
 - Déploie ActiveMQ (broker de messages)
-- Port 61616 : Pour les messages AMQP (utilisé par simulator et tracker)
+- **Image** : `supinfo4kube/queue:1.1.0` (ActiveMQ 5.17.3)
+- **Réplicas** : 2 (haute disponibilité)
+- Port 61616 : Pour les messages OpenWire (utilisé par simulator et tracker)
 - Port 8161 : Interface web de gestion ActiveMQ
 
 #### Service
@@ -299,29 +366,29 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: trucks-queue
+  name: fleetman-queue
 spec:
   type: ClusterIP
   ports:
-    - name: amqp
+    - name: openwire
       port: 61616
-      targetPort: amqp
+      targetPort: 61616
     - name: ui
       port: 8161
       targetPort: ui
 ```
 
 **Fonction** :
-- Expose ActiveMQ dans le cluster
-- Les autres pods peuvent accéder via `trucks-queue:61616` (résolution DNS automatique)
+- Expose ActiveMQ dans le cluster via ClusterIP
+- Les autres pods peuvent accéder via `fleetman-queue.fleetman.svc.cluster.local:61616` (DNS Kubernetes complet)
 
 **Liens avec autres composants** :
-- Utilisé par `trucks-position-simulator` via `ACTIVEMQ_URL=tcp://trucks-queue:61616`
-- Utilisé par `trucks-position-tracker` via `ACTIVEMQ_URL=tcp://trucks-queue:61616`
+- Utilisé par `fleetman-position-simulator` via `ACTIVEMQ_URL=tcp://fleetman-queue.fleetman.svc.cluster.local:61616`
+- Utilisé par `fleetman-position-tracker` via `SPRING_ACTIVEMQ_BROKER_URL=tcp://fleetman-queue.fleetman.svc.cluster.local:61616`
 
 ---
 
-### 4. `trucks-position-simulator.yaml`
+### 4. `fleetman-position-simulator.yaml`
 
 **Contient** : Deployment + Service
 
@@ -329,7 +396,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: trucks-position-simulator
+  name: fleetman-position-simulator
 spec:
   replicas: 1
   template:
@@ -341,7 +408,11 @@ spec:
             - name: SPRING_PROFILES_ACTIVE
               value: production-microservice
             - name: ACTIVEMQ_URL
-              value: tcp://trucks-queue:61616
+              value: tcp://fleetman-queue.fleetman.svc.cluster.local:61616
+            - name: SPRING_ACTIVEMQ_BROKER_URL
+              value: tcp://fleetman-queue.fleetman.svc.cluster.local:61616
+            - name: SPRING_JMS_ACTIVEMQ_BROKER_URL
+              value: tcp://fleetman-queue.fleetman.svc.cluster.local:61616
             - name: VEHICLE_COUNT
               value: "12"
             - name: MESSAGE_FREQUENCY_MS
@@ -350,7 +421,7 @@ spec:
 
 **Fonction** :
 - **Producteur de messages** : Génère des positions de véhicules simulées
-- Envoie les messages à ActiveMQ via `trucks-queue:61616`
+- Envoie les messages à ActiveMQ via `fleetman-queue:61616`
 - **VEHICLE_COUNT** : Nombre de véhicules à simuler (12)
 - **MESSAGE_FREQUENCY_MS** : Fréquence d'envoi (toutes les 500ms)
 
@@ -360,12 +431,12 @@ spec:
 3. Répète toutes les 500ms
 
 **Liens avec autres composants** :
-- **Dépend de** : `trucks-queue` (doit être déployé avant)
-- **Produit pour** : `trucks-position-tracker` (consomme les messages)
+- **Dépend de** : `fleetman-queue` (doit être déployé avant)
+- **Produit pour** : `fleetman-position-tracker` (consomme les messages)
 
 ---
 
-### 5. `trucks-position-tracker.yaml`
+### 5. `fleetman-position-tracker.yaml`
 
 **Contient** : Deployment + Service ClusterIP
 
@@ -373,7 +444,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: trucks-position-tracker
+  name: fleetman-position-tracker
 spec:
   replicas: 2  # Haute disponibilité
   template:
@@ -382,19 +453,22 @@ spec:
         - name: app
           image: supinfo4kube/position-tracker:1.1.0
           env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: production-microservice
             - name: ACTIVEMQ_URL
-              value: tcp://trucks-queue:61616
+              value: tcp://fleetman-queue.fleetman.svc.cluster.local:61616
+            - name: SPRING_ACTIVEMQ_BROKER_URL
+              value: tcp://fleetman-queue.fleetman.svc.cluster.local:61616
+            - name: SPRING_JMS_ACTIVEMQ_BROKER_URL
+              value: tcp://fleetman-queue.fleetman.svc.cluster.local:61616
             - name: SPRING_DATA_MONGODB_URI
-              value: mongodb://trucks-mongodb:27017/trucks
-          readinessProbe:
-            tcpSocket:
-              port: 8080
-            periodSeconds: 5
-          livenessProbe:
-            tcpSocket:
-              port: 8080
-            initialDelaySeconds: 40
-            periodSeconds: 10
+              value: mongodb://fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local:27017/fleetman
+            - name: SPRING_DATA_MONGODB_DATABASE
+              value: fleetman
+            - name: SPRING_JMS_LISTENER_AUTO_STARTUP
+              value: "true"
+            - name: SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING
+              value: "true"
 ```
 
 **Fonction** :
@@ -408,19 +482,19 @@ spec:
 - **livenessProbe** : Vérifie que le pod est toujours vivant (toutes les 10s, après 40s de démarrage)
 
 **Flux** :
-1. Consomme les messages de `trucks-queue`
-2. Stocke chaque position dans MongoDB (`trucks` database)
+1. Consomme les messages de `fleetman-queue`
+2. Stocke chaque position dans MongoDB (`fleetman` database)
 3. Expose une API REST pour récupérer les positions stockées
 
 **Liens avec autres composants** :
 - **Dépend de** :
-  - `trucks-queue` (consomme les messages)
-  - `trucks-mongodb` (stocke les données)
-- **Utilisé par** : `trucks-api-gateway` (appelle l'API REST)
+  - `fleetman-queue` (consomme les messages)
+  - `fleetman-mongodb` (stocke les données)
+- **Utilisé par** : `fleetman-api-gateway` (appelle l'API REST)
 
 ---
 
-### 6. `trucks-api-gateway.yaml`
+### 6. `fleetman-api-gateway.yaml`
 
 **Contient** : Deployment + Service ClusterIP
 
@@ -428,7 +502,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: trucks-api-gateway
+  name: fleetman-api-gateway
 spec:
   replicas: 2  # Haute disponibilité
   template:
@@ -437,10 +511,24 @@ spec:
         - name: app
           image: supinfo4kube/api-gateway:1.1.0
           env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: production-microservice
             - name: FLEETMAN_POSITION_TRACKER_URL
-              value: http://trucks-position-tracker.trucks.svc.cluster.local:8080
+              value: http://fleetman-position-tracker.fleetman.svc.cluster.local:8080
             - name: SPRING_DATA_MONGODB_URI
-              value: mongodb://trucks-mongodb:27017/trucks
+              value: mongodb://fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local:27017/fleetman
+            - name: SPRING_DATA_MONGODB_DATABASE
+              value: fleetman
+            - name: SPRING_CLOUD_GATEWAY_ROUTES_0_ID
+              value: position-tracker
+            - name: SPRING_CLOUD_GATEWAY_ROUTES_0_URI
+              value: http://fleetman-position-tracker.fleetman.svc.cluster.local:8080
+            - name: SPRING_CLOUD_GATEWAY_ROUTES_0_PREDICATES_0
+              value: Path=/api/vehicles/**
+            - name: SPRING_CLOUD_GATEWAY_ROUTES_0_FILTERS_0
+              value: RewritePath=/api/vehicles/(?<path>.*),/vehicles/${path}
+            - name: SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING
+              value: "true"
 ```
 
 **Fonction** :
@@ -449,19 +537,19 @@ spec:
 - **2 réplicas** : Pour la haute disponibilité
 
 **URL complète du tracker** :
-- `http://trucks-position-tracker.trucks.svc.cluster.local:8080`
+- `http://fleetman-position-tracker.fleetman.svc.cluster.local:8080`
 - Format DNS Kubernetes : `<service>.<namespace>.svc.cluster.local:<port>`
 - Permet l'accès même si le service est dans un autre namespace
 
 **Liens avec autres composants** :
 - **Dépend de** :
-  - `trucks-position-tracker` (appelle l'API)
-  - `trucks-mongodb` (accès direct pour certaines requêtes)
-- **Utilisé par** : `trucks-web-app` (appelle l'API Gateway)
+  - `fleetman-position-tracker` (appelle l'API)
+  - `fleetman-mongodb` (accès direct pour certaines requêtes)
+- **Utilisé par** : `fleetman-web-app` (appelle l'API Gateway)
 
 ---
 
-### 7. `trucks-web-app.yaml`
+### 7. `fleetman-web-app.yaml`
 
 **Contient** : Deployment + Service NodePort
 
@@ -471,17 +559,14 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: trucks-web-app
+  name: fleetman-web-app
 spec:
   replicas: 2
   template:
     spec:
       containers:
-        - name: app
+        - name: webapp
           image: supinfo4kube/web-app:1.1.0
-          env:
-            - name: API_GATEWAY_URL
-              value: /api
           volumeMounts:
             - name: nginx-config
               mountPath: /etc/nginx/nginx.conf
@@ -489,16 +574,16 @@ spec:
       volumes:
         - name: nginx-config
           configMap:
-            name: trucks-webapp-nginx
+            name: fleetman-webapp-nginx
 ```
 
 **Fonction** :
 - **Frontend** : Application web (Nginx + HTML/JS)
 - **2 réplicas** : Pour la haute disponibilité
-- **ConfigMap** : Utilise `trucks-webapp-nginx` pour la configuration Nginx
+- **ConfigMap** : Utilise `fleetman-webapp-nginx` pour la configuration Nginx
 - **API_GATEWAY_URL** : Chemin relatif `/api` pour appeler l'API Gateway
 
-**Note** : Le ConfigMap `trucks-webapp-nginx` doit être créé séparément (non inclus dans ce fichier).
+**Note** : Le ConfigMap `fleetman-webapp-nginx` doit être créé séparément (non inclus dans ce fichier).
 
 #### Service NodePort
 
@@ -506,29 +591,29 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: trucks-web-app
+  name: fleetman-web-app
 spec:
   type: NodePort
   ports:
     - name: http
       port: 80
       targetPort: http
-      nodePort: 30081
+      nodePort: 30080
 ```
 
 **Fonction** :
 - **NodePort** : Expose l'application à l'extérieur du cluster
-- **Port 30081** : Accessible depuis n'importe quel nœud du cluster
+- **Port 30080** : Accessible depuis n'importe quel nœud du cluster
 - **Port 80** : Port interne du service
 
 **Liens avec autres composants** :
 - **Dépend de** : 
-  - `trucks-api-gateway` (appelle `/api` qui pointe vers l'API Gateway)
-  - `trucks-webapp-nginx` ConfigMap (configuration Nginx)
+  - `fleetman-api-gateway` (appelle `/api` qui pointe vers l'API Gateway)
+  - `fleetman-webapp-nginx` ConfigMap (configuration Nginx)
 
 ---
 
-### 8. `trucks-webapp-config.yaml`
+### 8. `fleetman-webapp-config.yaml`
 
 **Contient** : ConfigMap
 
@@ -536,13 +621,13 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: trucks-webapp-nginx
-  namespace: trucks
+  name: fleetman-webapp-nginx
+  namespace: fleetman
 data:
   nginx.conf: |
     # Configuration Nginx complète
     upstream api_gateway {
-      server trucks-api-gateway.trucks.svc.cluster.local:8080;
+      server fleetman-api-gateway.fleetman.svc.cluster.local:8080;
     }
     # Proxy /api/ vers l'API Gateway
     location /api/ {
@@ -551,60 +636,62 @@ data:
 ```
 
 **Fonction** :
-- **ConfigMap** : Stocke la configuration Nginx pour la webapp
-- **Proxy reverse** : Configure Nginx pour rediriger les requêtes `/api/` vers `trucks-api-gateway`
-- **Upstream** : Définit le serveur backend (API Gateway) avec son URL DNS complète
-- **WebSocket** : Support des connexions WebSocket pour les mises à jour en temps réel
+- **ConfigMap** : Stocke la configuration Nginx complète pour la webapp
+- **Proxy reverse** : Configure Nginx pour router les requêtes vers les différents backends
+- **Routes configurées** :
+  - `/api/vehicles/{id}/history` → `fleetman-history-service` (historique des positions)
+  - `/api/vehicles/` → `fleetman-position-tracker` (liste et positions en temps réel)
+  - `/api/` → `fleetman-api-gateway` (autres routes API)
+- **Timeouts** : `proxy_connect_timeout`, `proxy_send_timeout`, `proxy_read_timeout` à 60s pour éviter les 504
+- **CORS** : Headers CORS configurés pour toutes les routes API
+- **DNS Resolver** : `resolver kube-dns.kube-system.svc.cluster.local valid=10s` pour la résolution DNS dynamique
 
 **Pourquoi c'est nécessaire** :
-- La webapp (`trucks-web-app.yaml`) monte ce ConfigMap dans `/etc/nginx/nginx.conf`
+- La webapp (`fleetman-web-app.yaml`) monte ce ConfigMap dans `/etc/nginx/nginx.conf`
 - Sans ce ConfigMap, Nginx ne saurait pas où rediriger les requêtes API
 - Permet de séparer la configuration du code de l'application
+- Permet le routage intelligent vers différents services backend
 
 **Liens avec autres composants** :
-- **Utilisé par** : `trucks-web-app` (monté comme volume dans le pod)
+- **Utilisé par** : `fleetman-web-app` (monté comme volume dans le pod)
 
 ---
 
-### 9. `trucks-ingress.yaml` (Optionnel)
+### 9. `fleetman-history-service.yaml`
 
-**Contient** : Ingress
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: trucks-ingress
-  namespace: trucks
-spec:
-  rules:
-    - host: trucks.local
-      http:
-        paths:
-          - path: /api
-            backend:
-              service:
-                name: trucks-api-gateway
-          - path: /
-            backend:
-              service:
-                name: trucks-web-app
-```
+**Contient** : Deployment + Service
 
 **Fonction** :
-- **Ingress** : Expose l'application via un contrôleur Ingress (alternative au NodePort)
-- **Routage** : Route `/api` vers l'API Gateway et `/` vers la webapp
-- **Host** : Accessible via `trucks.local` (nécessite configuration DNS ou `/etc/hosts`)
-
-**Quand l'utiliser** :
-- Si vous avez un contrôleur Ingress installé (ex: NGINX Ingress Controller)
-- Pour exposer l'application via un nom de domaine au lieu d'une IP:port
-- Pour gérer le TLS/HTTPS automatiquement
-
-**Note** : Si vous utilisez NodePort (port 30081), vous n'avez pas besoin de cet Ingress.
+- **Service Python Flask** : Expose l'historique des positions de véhicules
+- **Image** : `python:3.9-slim`
+- **Endpoints** :
+  - `/health` : Health check
+  - `/api/vehicles/{name}/history` : Historique des positions d'un véhicule
+  - `/api/vehicles/{name}/positions` : Alias de `/history`
+- **Connexion MongoDB** : Lit directement la collection `vehiclePosition` via FQDN
+- **Variables d'environnement** :
+  - `MONGODB_HOST=fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local`
+  - `MONGODB_PORT=27017`
+  - `MONGODB_DB=fleetman`
 
 **Liens avec autres composants** :
-- **Utilise** : `trucks-api-gateway` et `trucks-web-app` (services backend)
+- **Dépend de** : `fleetman-mongodb` (lit la collection `vehiclePosition`)
+- **Utilisé par** : `fleetman-web-app` (via Nginx pour les routes `/api/vehicles/{id}/history`)
+
+### 10. `fleetman-positions-adapter.yaml`
+
+**Contient** : Deployment + Service + ConfigMap
+
+**Fonction** :
+- **Adapter Nginx** : Proxy Nginx pour le Position Tracker
+- **Image** : `nginx:alpine`
+- **ConfigMap** : Configuration Nginx pour router vers `fleetman-position-tracker`
+
+**Note** : Ce service est optionnel et peut être utilisé par l'API Gateway selon la configuration.
+
+**Liens avec autres composants** :
+- **Dépend de** : `fleetman-position-tracker`
+- **Utilisé par** : Potentiellement `fleetman-api-gateway` (selon configuration)
 
 ---
 
@@ -613,31 +700,39 @@ spec:
 ### Flux complet de bout en bout
 
 ```
-1. trucks-position-simulator
+1. fleetman-position-simulator
    └─> Génère des positions GPS (12 véhicules, toutes les 500ms)
-       └─> Envoie à trucks-queue (ActiveMQ) via AMQP
+       └─> Envoie à fleetman-queue (ActiveMQ) via AMQP
 
-2. trucks-queue (ActiveMQ)
+2. fleetman-queue (ActiveMQ)
    └─> Stocke les messages dans une queue
        └─> Distribue aux consommateurs
 
-3. trucks-position-tracker
-   └─> Consomme les messages de trucks-queue
-       ├─> Stocke dans trucks-mongodb (base de données)
-       └─> Expose une API REST sur le port 8080
+3. fleetman-position-tracker
+   └─> Consomme les messages de fleetman-queue
+       ├─> Stocke dans fleetman-mongodb (base de données)
+       └─> Expose une API REST sur le port 8080 (`/vehicles/`)
 
-4. trucks-api-gateway
-   └─> Appelle trucks-position-tracker (API REST)
-       ├─> Peut aussi lire directement trucks-mongodb
+4. fleetman-api-gateway
+   └─> Appelle fleetman-position-tracker (API REST)
+       ├─> Peut aussi lire directement fleetman-mongodb
        └─> Agrège et expose une API unifiée
 
-5. trucks-web-app
-   └─> Appelle trucks-api-gateway via /api
+5. fleetman-history-service
+   └─> Lit directement fleetman-mongodb
+       └─> Expose `/api/vehicles/{name}/history` pour l'historique
+
+6. fleetman-web-app
+   └─> Route les requêtes via Nginx :
+       ├─> `/api/vehicles/` → fleetman-position-tracker
+       ├─> `/api/vehicles/{id}/history` → fleetman-history-service
+       └─> `/api/` → fleetman-api-gateway
        └─> Affiche les positions sur une carte web
 
-6. Utilisateur
-   └─> Accède à http://<node-ip>:30081
+7. Utilisateur
+   └─> Accède à http://<node-ip>:30080
        └─> Voit la carte avec les positions en temps réel
+       └─> Peut cliquer sur un véhicule pour voir sa trace
 ```
 
 ### Séquence de démarrage
@@ -652,24 +747,24 @@ spec:
    └─> Écoute sur les ports 61616 et 8161
 
 3. Simulator démarre (Deployment)
-   └─> Se connecte à trucks-queue:61616
+   └─> Se connecte à fleetman-queue:61616
    └─> Commence à envoyer des messages
 
 4. Tracker démarre (Deployment)
-   └─> Se connecte à trucks-queue:61616 (consomme)
-   └─> Se connecte à trucks-mongodb:27017 (stocke)
+   └─> Se connecte à fleetman-queue:61616 (consomme)
+   └─> Se connecte à fleetman-mongodb:27017 (stocke)
    └─> Démarre l'API REST sur le port 8080
    └─> readinessProbe vérifie que le port 8080 répond
 
 5. API Gateway démarre (Deployment)
-   └─> Se connecte à trucks-position-tracker (HTTP)
-   └─> Se connecte à trucks-mongodb (optionnel)
+   └─> Se connecte à fleetman-position-tracker (HTTP)
+   └─> Se connecte à fleetman-mongodb (optionnel)
    └─> readinessProbe vérifie que le port 8080 répond
 
 6. Web App démarre (Deployment)
    └─> Charge la config Nginx depuis ConfigMap
    └─> readinessProbe vérifie que le port 80 répond
-   └─> Accessible via NodePort 30081
+   └─> Accessible via NodePort 30080
 ```
 
 ---
@@ -683,26 +778,26 @@ spec:
 kubectl get nodes -o wide
 
 # Accéder à l'application
-http://<IP_WORKER>:30081
+http://<IP_WORKER>:30080
 ```
 
 Exemple :
-- `http://192.168.56.12:30081` (worker1)
-- `http://192.168.56.11:30081` (worker2)
+- `http://192.168.56.12:30080` (worker1)
+- `http://192.168.56.11:30080` (worker2)
 
 ### Accès local (Port Forward)
 
 ```bash
-kubectl -n trucks port-forward svc/trucks-web-app 30081:80
+kubectl -n fleetman port-forward svc/fleetman-web-app 30080:80
 ```
 
-Puis ouvrir : `http://localhost:30081`
+Puis ouvrir : `http://localhost:30080`
 
 ### Accès à la console ActiveMQ
 
 ```bash
 # Port-forward vers la console ActiveMQ
-kubectl -n trucks port-forward svc/trucks-queue 8161:8161
+kubectl -n fleetman port-forward svc/fleetman-queue 8161:8161
 ```
 
 Puis ouvrir : `http://localhost:8161` (admin/admin par défaut)
@@ -715,83 +810,83 @@ Puis ouvrir : `http://localhost:8161` (admin/admin par défaut)
 
 ```bash
 # Voir tous les pods
-kubectl get pods -n trucks
+kubectl get pods -n fleetman
 
 # Voir les détails d'un pod en erreur
-kubectl describe pod <nom-du-pod> -n trucks
+kubectl describe pod <nom-du-pod> -n fleetman
 
 # Voir les logs d'un pod
-kubectl logs <nom-du-pod> -n trucks
+kubectl logs <nom-du-pod> -n fleetman
 
 # Suivre les logs en temps réel
-kubectl logs -f <nom-du-pod> -n trucks
+kubectl logs -f <nom-du-pod> -n fleetman
 ```
 
 ### Vérifier les services et endpoints
 
 ```bash
 # Voir tous les services
-kubectl get svc -n trucks
+kubectl get svc -n fleetman
 
 # Voir les endpoints (pods associés aux services)
-kubectl get endpoints -n trucks
+kubectl get endpoints -n fleetman
 
 # Détails d'un service
-kubectl describe svc <nom-service> -n trucks
+kubectl describe svc <nom-service> -n fleetman
 ```
 
 ### Vérifier MongoDB
 
 ```bash
 # Voir le StatefulSet
-kubectl get statefulset trucks-mongodb -n trucks
+kubectl get statefulset fleetman-mongodb -n fleetman
 
 # Voir le pod MongoDB
-kubectl get pods -n trucks | grep mongodb
+kubectl get pods -n fleetman | grep mongodb
 
 # Voir les logs MongoDB
-kubectl logs trucks-mongodb-0 -n trucks
+kubectl logs fleetman-mongodb-0 -n fleetman
 
 # Vérifier le PVC
-kubectl get pvc -n trucks
+kubectl get pvc -n fleetman
 
 # Détails du PVC
-kubectl describe pvc data-trucks-mongodb-0 -n trucks
+kubectl describe pvc data-fleetman-mongodb-0 -n fleetman
 ```
 
 ### Vérifier la connectivité entre services
 
 ```bash
 # Tester depuis un pod tracker vers l'API Gateway
-kubectl exec -n trucks -it <pod-tracker> -- \
-  curl -sS http://trucks-api-gateway:8080/actuator/health
+kubectl exec -n fleetman -it <pod-tracker> -- \
+  curl -sS http://fleetman-api-gateway:8080/actuator/health
 
 # Tester depuis un pod tracker vers MongoDB
-kubectl exec -n trucks -it <pod-tracker> -- \
-  nc -zv trucks-mongodb 27017
+kubectl exec -n fleetman -it <pod-tracker> -- \
+  nc -zv fleetman-mongodb 27017
 
 # Tester depuis un pod tracker vers la queue
-kubectl exec -n trucks -it <pod-tracker> -- \
-  nc -zv trucks-queue 61616
+kubectl exec -n fleetman -it <pod-tracker> -- \
+  nc -zv fleetman-queue 61616
 ```
 
 ### Redémarrer un composant
 
 ```bash
 # Redémarrer un déploiement
-kubectl rollout restart deploy/trucks-queue -n trucks
+kubectl rollout restart deploy/fleetman-queue -n fleetman
 
 # Redémarrer un StatefulSet
-kubectl rollout restart statefulset/trucks-mongodb -n trucks
+kubectl rollout restart statefulset/fleetman-mongodb -n fleetman
 
 # Supprimer un pod (sera recréé automatiquement)
-kubectl delete pod <nom-du-pod> -n trucks
+kubectl delete pod <nom-du-pod> -n fleetman
 ```
 
 ### Problèmes courants
 
 1. **Pods en CrashLoopBackOff**
-   - Vérifier les logs : `kubectl logs <pod> -n trucks`
+   - Vérifier les logs : `kubectl logs <pod> -n fleetman`
    - Vérifier que les dépendances sont prêtes (MongoDB, Queue)
 
 2. **Pods en ImagePullBackOff**
@@ -803,7 +898,7 @@ kubectl delete pod <nom-du-pod> -n trucks
    - Vérifier que les pods sont READY (readinessProbe)
 
 4. **MongoDB ne démarre pas**
-   - Vérifier que le PVC est créé : `kubectl get pvc -n trucks`
+   - Vérifier que le PVC est créé : `kubectl get pvc -n fleetman`
    - Vérifier la StorageClass : `kubectl get storageclass`
 
 ---
@@ -814,28 +909,28 @@ kubectl delete pod <nom-du-pod> -n trucks
 
 ```bash
 # Supprimer tous les déploiements
-kubectl delete -f k8s/trucks-*.yaml --namespace=trucks
+kubectl delete -f k8s/fleetman-*.yaml --namespace=fleetman
 
 # Supprimer le namespace (supprime tout)
-kubectl delete ns trucks
+kubectl delete ns fleetman
 ```
 
 ### Supprimer uniquement les ressources (garder le namespace)
 
 ```bash
 # Supprimer chaque composant individuellement
-kubectl delete -f k8s/trucks-mongodb.yaml
-kubectl delete -f k8s/trucks-queue.yaml
-kubectl delete -f k8s/trucks-position-simulator.yaml
-kubectl delete -f k8s/trucks-position-tracker.yaml
-kubectl delete -f k8s/trucks-api-gateway.yaml
-kubectl delete -f k8s/trucks-web-app.yaml
+kubectl delete -f k8s/fleetman-mongodb.yaml
+kubectl delete -f k8s/fleetman-queue.yaml
+kubectl delete -f k8s/fleetman-position-simulator.yaml
+kubectl delete -f k8s/fleetman-position-tracker.yaml
+kubectl delete -f k8s/fleetman-api-gateway.yaml
+kubectl delete -f k8s/fleetman-web-app.yaml
 ```
 
 **Note** : Les PVC (volumes persistants) ne sont pas supprimés automatiquement. Pour les supprimer :
 
 ```bash
-kubectl delete pvc -n trucks --all
+kubectl delete pvc -n fleetman --all
 ```
 
 ---
@@ -844,28 +939,54 @@ kubectl delete pvc -n trucks --all
 
 | Ressource | Nombre | Type |
 |-----------|--------|------|
-| **Namespace** | 1 | `trucks` |
-| **StatefulSet** | 1 | `trucks-mongodb` (1 replica) |
-| **Deployments** | 5 | Queue (1), Simulator (1), Tracker (2), API Gateway (2), Web App (2) |
-| **Services** | 6 | 5 ClusterIP + 1 NodePort |
-| **PVC** | 1 | `data-trucks-mongodb-0` (5Gi) |
-| **Total Pods** | 9 | 1 MongoDB + 1 Queue + 1 Simulator + 2 Tracker + 2 API Gateway + 2 Web App |
+| **Namespace** | 1 | `fleetman` |
+| **StatefulSet** | 1 | `fleetman-mongodb` (1 replica) |
+| **Deployments** | 7 | Queue (2), Simulator (1), Tracker (2), API Gateway (2), History Service (1), Positions Adapter (1), Web App (2) |
+| **Services** | 8 | 7 ClusterIP + 1 NodePort |
+| **ConfigMaps** | 2 | `fleetman-webapp-nginx`, `fleetman-positions-adapter-nginx` |
+| **PVC** | 1 | `data-fleetman-mongodb-0` (5Gi) |
+| **Total Pods** | 12 | 1 MongoDB + 2 Queue + 1 Simulator + 2 Tracker + 2 API Gateway + 1 History Service + 1 Positions Adapter + 2 Web App |
 
 ---
 
 ## 🎯 Points clés à retenir
 
-1. **Ordre de déploiement** : MongoDB → Queue → Simulator → Tracker → API Gateway → Web App
+1. **Ordre de déploiement** : MongoDB → Queue → Simulator → Tracker → API Gateway → History Service → Positions Adapter → Web App
 2. **StatefulSet pour MongoDB** : Nécessaire pour la persistance des données
-3. **Service Headless pour MongoDB** : Permet l'accès direct aux pods
-4. **NodePort pour Web App** : Seul service accessible de l'extérieur
-5. **Probes** : Readiness et Liveness probes assurent la disponibilité
-6. **DNS Kubernetes** : Les services se trouvent automatiquement via DNS (`<service>.<namespace>.svc.cluster.local`)
+3. **Service Headless pour MongoDB** : Permet l'accès direct aux pods via FQDN (`fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local`)
+4. **NodePort pour Web App** : Seul service accessible de l'extérieur (port 30080)
+5. **Probes** : Readiness et Liveness probes assurent la disponibilité (MongoDB utilise `db.adminCommand('ping')`)
+6. **DNS Kubernetes** : Tous les services utilisent des FQDN complets (`<service>.<namespace>.svc.cluster.local`) pour la résolution DNS
+7. **ActiveMQ** : Service ClusterIP avec DNS Kubernetes (`tcp://fleetman-queue.fleetman.svc.cluster.local:61616`)
+8. **Nginx Routing** : Configuration Nginx avec timeouts (60s) et routage intelligent vers différents backends
+9. **History Service** : Service Python Flask pour l'historique des véhicules, lit directement MongoDB
+10. **Images** : Toutes les images utilisent la version `1.1.0` (sauf `fleetman-history-service` qui utilise `python:3.9-slim`)
 
 ---
+
+## 🔧 Configuration ActiveMQ
+
+**Important** : Tous les microservices Spring Boot utilisent des URLs ActiveMQ via DNS Kubernetes :
+
+- `ACTIVEMQ_URL=tcp://fleetman-queue.fleetman.svc.cluster.local:61616`
+- `SPRING_ACTIVEMQ_BROKER_URL=tcp://fleetman-queue.fleetman.svc.cluster.local:61616`
+- `SPRING_JMS_ACTIVEMQ_BROKER_URL=tcp://fleetman-queue.fleetman.svc.cluster.local:61616`
+
+**Note sur les versions** : Le broker ActiveMQ utilise la version 5.17.3, tandis que les clients Spring Boot utilisent activemq-client 5.16.5. Cette différence peut causer des EOFException dans les logs, mais le flux de données fonctionne correctement.
+
+## 🔧 Configuration MongoDB
+
+**Important** : Tous les services utilisent le FQDN complet pour MongoDB :
+
+- `SPRING_DATA_MONGODB_URI=mongodb://fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local:27017/fleetman`
+- `SPRING_DATA_MONGODB_DATABASE=fleetman`
+- `MONGODB_HOST=fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local`
+
+**Collection** : Les positions sont stockées dans la collection `vehiclePosition` (pas `positions`).
 
 ## 📚 Ressources supplémentaires
 
 - [Documentation Kubernetes - StatefulSets](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)
 - [Documentation Kubernetes - Services](https://kubernetes.io/docs/concepts/services-networking/service/)
 - [Documentation Kubernetes - Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+- [Documentation Kubernetes - ConfigMaps](https://kubernetes.io/docs/concepts/configuration/configmap/)

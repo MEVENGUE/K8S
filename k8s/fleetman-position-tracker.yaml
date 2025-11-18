@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fleetman-position-tracker
+  namespace: fleetman
+  labels:
+    app: fleetman-position-tracker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fleetman-position-tracker
+  template:
+    metadata:
+      labels:
+        app: fleetman-position-tracker
+    spec:
+      containers:
+        - name: app
+          image: supinfo4kube/position-tracker:1.1.0
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: production-microservice
+            # 🔥 ActiveMQ correct (DNS Kubernetes)
+            - name: ACTIVEMQ_URL
+              value: tcp://fleetman-queue.fleetman.svc.cluster.local:61616
+            - name: SPRING_ACTIVEMQ_BROKER_URL
+              value: tcp://fleetman-queue.fleetman.svc.cluster.local:61616
+            - name: SPRING_JMS_ACTIVEMQ_BROKER_URL
+              value: tcp://fleetman-queue.fleetman.svc.cluster.local:61616
+            # 🔥 MongoDB correct
+            - name: SPRING_DATA_MONGODB_URI
+              value: mongodb://fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local:27017/fleetman
+            # 🔥 Obligatoire sinon Spring Boot plante !
+            - name: SPRING_DATA_MONGODB_DATABASE
+              value: fleetman
+            # 🔥 Spring Cloud fixes
+            - name: SPRING_JMS_LISTENER_AUTO_STARTUP
+              value: "true"
+            - name: SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING
+              value: "true"
+          ports:
+            - containerPort: 8080
+              name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleetman-position-tracker
+  namespace: fleetman
+spec:
+  selector:
+    app: fleetman-position-tracker
+  ports:
+    - port: 8080

@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fleetman-history-service
+  namespace: fleetman
+  labels:
+    app: fleetman-history-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fleetman-history-service
+  template:
+    metadata:
+      labels:
+        app: fleetman-history-service
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+      containers:
+        - name: app
+          image: python:3.9-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              pip install -q flask pymongo==3.12.0 && \
+              python -c "
+              from flask import Flask, jsonify, request
+              from pymongo import MongoClient
+              import os
+              import urllib.parse
+              
+              app = Flask(__name__)
+              
+              # Connexion MongoDB
+              mongo_host = os.getenv('MONGODB_HOST', 'fleetman-mongodb')
+              mongo_port = int(os.getenv('MONGODB_PORT', '27017'))
+              mongo_db = os.getenv('MONGODB_DB', 'fleetman')
+              
+              client = MongoClient(mongo_host, mongo_port)
+              db = client[mongo_db]
+              
+              @app.route('/health', methods=['GET'])
+              def health():
+                  return jsonify({'status': 'ok'}), 200
+              
+              @app.route('/api/vehicles/<vehicle_name>/history', methods=['GET'])
+              def get_history(vehicle_name):
+                  try:
+                      # Décoder le nom du véhicule (gérer les espaces encodés)
+                      vehicle_name_decoded = urllib.parse.unquote(vehicle_name)
+                      
+                      # Récupérer l'historique des positions
+                      # La collection s'appelle 'vehiclePosition' et non 'positions'
+                      limit = int(request.args.get('limit', 1000))
+                      
+                      # Récupérer les positions triées par timestamp (plus anciennes en premier pour la trace)
+                      positions = list(db.vehiclePosition.find(
+                          {'name': vehicle_name_decoded}
+                      ).sort('timestamp', 1).limit(limit))
+                      
+                      # Formater les données pour l'interface
+                      formatted_positions = []
+                      for pos in positions:
+                          formatted = {
+                              'name': pos.get('name', ''),
+                              'lat': float(pos.get('lat', 0)) if isinstance(pos.get('lat'), (int, float, str)) else 0,
+                              'longitude': float(pos.get('longitude', 0)) if isinstance(pos.get('longitude'), (int, float, str)) else 0,
+                              'timestamp': pos.get('timestamp').isoformat() if pos.get('timestamp') else '',
+                              'speed': float(pos.get('speed', 0)) if isinstance(pos.get('speed'), (int, float, str)) else 0
+                          }
+                          formatted_positions.append(formatted)
+                      
+                      return jsonify(formatted_positions), 200
+                  except Exception as e:
+                      return jsonify({'error': str(e)}), 500
+              
+              @app.route('/api/vehicles/<vehicle_name>/positions', methods=['GET'])
+              def get_positions(vehicle_name):
+                  return get_history(vehicle_name)
+              
+              if __name__ == '__main__':
+                  app.run(host='0.0.0.0', port=8080)
+              "
+          env:
+            - name: MONGODB_HOST
+              value: fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local
+            - name: MONGODB_PORT
+              value: "27017"
+            - name: MONGODB_DB
+              value: fleetman
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleetman-history-service
+  namespace: fleetman
+  labels:
+    app: fleetman-history-service
+spec:
+  type: ClusterIP
+  selector:
+    app: fleetman-history-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+

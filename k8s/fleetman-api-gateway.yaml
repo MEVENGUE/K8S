@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fleetman-api-gateway
+  namespace: fleetman
+  labels:
+    app: fleetman-api-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fleetman-api-gateway
+  template:
+    metadata:
+      labels:
+        app: fleetman-api-gateway
+    spec:
+      containers:
+        - name: app
+          image: supinfo4kube/api-gateway:1.1.0
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: production-microservice
+            # 🔥 Position Tracker route
+            - name: FLEETMAN_POSITION_TRACKER_URL
+              value: http://fleetman-position-tracker.fleetman.svc.cluster.local:8080
+            # 🔥 Required or 404 on /api/*
+            - name: SPRING_CLOUD_GATEWAY_ROUTES_0_ID
+              value: positiontracker
+            - name: SPRING_CLOUD_GATEWAY_ROUTES_0_URI
+              value: http://fleetman-position-tracker.fleetman.svc.cluster.local:8080
+            - name: SPRING_CLOUD_GATEWAY_ROUTES_0_PREDICATES_0
+              value: Path=/api/vehicles/**
+            - name: SPRING_CLOUD_GATEWAY_ROUTES_0_FILTERS_0
+              value: RewritePath=/api/vehicles/(?<path>.*),/vehicles/${path}
+            # 🔥 MongoDB fix
+            - name: SPRING_DATA_MONGODB_URI
+              value: mongodb://fleetman-mongodb-0.fleetman-mongodb.fleetman.svc.cluster.local:27017/fleetman
+            - name: SPRING_DATA_MONGODB_DATABASE
+              value: fleetman
+            - name: SPRING_MAIN_ALLOW_BEAN_DEFINITION_OVERRIDING
+              value: "true"
+          ports:
+            - containerPort: 8080
+              name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fleetman-api-gateway
+  namespace: fleetman
+spec:
+  selector:
+    app: fleetman-api-gateway
+  ports:
+    - port: 8080

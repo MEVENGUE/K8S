@@ -1,40 +1,50 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: trucks-position-simulator
-  namespace: trucks
+  name: fleetman-position-simulator
+  namespace: fleetman
   labels:
-    app: trucks-position-simulator
+    app: fleetman-position-simulator
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: trucks-position-simulator
+      app: fleetman-position-simulator
   template:
     metadata:
       labels:
-        app: trucks-position-simulator
+        app: fleetman-position-simulator
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
       containers:
         - name: app
           image: supinfo4kube/position-simulator:1.1.0
-          imagePullPolicy: Always
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: production-microservice
             - name: ACTIVEMQ_URL
-              value: tcp://trucks-queue.trucks.svc.cluster.local:61616
+              value: tcp://fleetman-queue.fleetman.svc.cluster.local:61616
+            - name: SPRING_ACTIVEMQ_BROKER_URL
+              value: tcp://fleetman-queue.fleetman.svc.cluster.local:61616
+            - name: SPRING_JMS_ACTIVEMQ_BROKER_URL
+              value: tcp://fleetman-queue.fleetman.svc.cluster.local:61616
             - name: VEHICLE_COUNT
               value: "12"
             - name: MESSAGE_FREQUENCY_MS
               value: "500"
           resources:
             requests:
-              memory: "384Mi"
-              cpu: "200m"
+              memory: "256Mi"
+              cpu: "100m"
             limits:
-              memory: "768Mi"
-              cpu: "400m"
+              memory: "512Mi"
+              cpu: "300m"
           readinessProbe:
             tcpSocket:
               port: 8080
@@ -53,15 +63,15 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: trucks-position-simulator
-  namespace: trucks
+  name: fleetman-position-simulator
+  namespace: fleetman
   labels:
-    app: trucks-position-simulator
+    app: fleetman-position-simulator
 spec:
+  type: ClusterIP
   selector:
-    app: trucks-position-simulator
+    app: fleetman-position-simulator
   ports:
     - name: http
       port: 8080
       targetPort: 8080
-

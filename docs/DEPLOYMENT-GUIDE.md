@@ -63,7 +63,9 @@ kubectl apply -f k8s/fleetman-queue.yaml
 kubectl apply -f k8s/fleetman-position-simulator.yaml
 kubectl apply -f k8s/fleetman-position-tracker.yaml
 kubectl apply -f k8s/fleetman-api-gateway.yaml
-kubectl apply -f k8s/fleetman-webapp.yaml
+kubectl apply -f k8s/fleetman-history-service.yaml
+kubectl apply -f k8s/fleetman-positions-adapter.yaml
+kubectl apply -f k8s/fleetman-web-app.yaml
 ```
 
 ### 4. Vérifier le déploiement
@@ -190,38 +192,38 @@ kubectl delete ns fleetman
 
 ```
 ┌─────────────────┐
-│  fleetman-webapp│ (NodePort 30080)
+│  fleetman-web-app│ (NodePort 30080)
 │   (Nginx)       │
 └────────┬────────┘
          │ /api/*
          ▼
-┌─────────────────┐
-│ fleetman-api-   │
-│    gateway      │
-└────────┬────────┘
-         │
     ┌────┴────┐
+    │         │
     ▼         ▼
 ┌─────────┐ ┌──────────────────┐
-│position │ │  fleetman-queue  │
-│tracker  │ │   (ActiveMQ)     │
-└────┬────┘ └────────┬──────────┘
-     │              │
-     │              │
-     ▼              ▼
-┌─────────────────────────┐
-│  fleetman-mongodb       │
-│   (StatefulSet)         │
-└─────────────────────────┘
-
-┌─────────────────────────┐
-│fleetman-position-       │
-│    simulator            │
-└──────────┬──────────────┘
-           │
-           ▼
-    ┌──────────────┐
-    │fleetman-queue│
-    └──────────────┘
+│fleetman-│ │fleetman-position- │
+│api-     │ │    tracker        │
+│gateway  │ └────────┬───────────┘
+└─────────┘          │
+                    │
+    ┌───────────────┴───────────────┐
+    │                               │
+    ▼                               ▼
+┌─────────┐              ┌──────────────────┐
+│fleetman-│              │  fleetman-queue  │
+│mongodb  │              │   (ActiveMQ)     │
+└────┬────┘              └────────┬──────────┘
+     │                           │ AMQP
+     │                           ▼
+     │                  ┌─────────────────┐
+     │                  │fleetman-position-│
+     │                  │   simulator      │
+     │                  └─────────────────┘
+     │
+     ▼
+┌─────────────────┐
+│fleetman-history-│
+│    service      │
+└─────────────────┘
 ```
 
