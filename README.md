@@ -5,12 +5,6 @@ Ce projet contient les manifests Kubernetes pour déployer une application micro
 <img width="1596" height="871" alt="image" src="https://github.com/user-attachments/assets/1683ab63-b1e3-4071-8f76-91f59e3637f8" />
 
 
-## ⚠️ Note importante
-
-**Convention de nommage** : Le barème du mini-projet mentionne "trucks-" mais le sujet utilise "fleetman-" (comme dans le fichier Docker Compose fourni). Les manifests de ce projet utilisent la convention "fleetman-" qui correspond au Docker Compose fourni dans l'énoncé.
-
-Nous avons choisi de suivre la convention "fleetman-" du Docker Compose fourni, qui est cohérente avec le sujet du mini-projet pour la soutenance.
-
 ## 📋 Table des matières
 
 1. [Architecture de l'application](#architecture-de-lapplication)
