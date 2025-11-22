@@ -20,6 +20,11 @@ Ce projet contient les manifests Kubernetes pour déployer une application micro
 
 ## 🏗️ Architecture de l'application
 
+Utiliser les outils et technologies suivants :
+
+<img width="674" height="420" alt="image" src="https://github.com/user-attachments/assets/f6453799-3b88-4d1e-abd4-d328a94078ee" />
+
+
 L'application Fleetman est composée de 8 microservices qui communiquent entre eux :
 
 ```
