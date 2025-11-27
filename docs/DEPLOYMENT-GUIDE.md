@@ -6,9 +6,9 @@ Ce guide vous permet de déployer l'application Fleetman sur votre cluster Kuber
 
 ## Informations du cluster
 
-- **Master** : `ssh master@192.168.56.10`
-- **Worker1** : `ssh worker1@192.168.56.12`
-- **Worker2** : `ssh worker2@192.168.56.11`
+- **Master** : `ssh master@192.168.xx.xx`
+- **Worker1** : `ssh worker_id@192.168.xx.xx`
+- **Worker2** : `ssh worker2_id@192.168.xx.xx`
 
 ## Étapes de déploiement
 
@@ -17,7 +17,7 @@ Ce guide vous permet de déployer l'application Fleetman sur votre cluster Kuber
 Depuis Windows PowerShell, exécutez :
 
 ```powershell
-.\scripts\setup-kubeconfig.ps1 -MasterIP "192.168.56.10" -User "master"
+.\scripts\setup-kubeconfig.ps1 -MasterIP "192.168.xx.xx" -User "master"
 ```
 
 Ce script va :
@@ -90,8 +90,8 @@ kubectl -n fleetman logs <pod-name>
 
 L'application est accessible sur n'importe quel nœud worker via le port 30080 :
 
-- `http://192.168.56.12:30080` (worker1)
-- `http://192.168.56.11:30080` (worker2)
+- `http://192.168.xx.xx:30080` (worker1)
+- `http://192.168.xx.xx:30080` (worker2)
 
 **Méthode 2 : Via port-forward**
 
