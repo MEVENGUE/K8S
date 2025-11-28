@@ -142,7 +142,7 @@ sudo systemctl restart containerd
 ## Initialiser le control-plane (master uniquement)
 
 ```bash
-sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+sudo kubeadm init --pod-network-cidr=10.244.x.x/xx
 ```
 
 Configurer `kubectl` pour l'utilisateur courant:
