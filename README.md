@@ -783,8 +783,8 @@ http://<IP_WORKER>:30080
 ```
 
 Exemple :
-- `http://192.168.56.12:30080` (worker1)
-- `http://192.168.56.11:30080` (worker2)
+- `http://192.168.xx.xx:30080` (worker1)
+- `http://192.168.xx.xx:30080` (worker2)
 
 ### Accès local (Port Forward)
 
