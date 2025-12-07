@@ -991,3 +991,13 @@ kubectl delete pvc -n fleetman --all
 - [Documentation Kubernetes - Services](https://kubernetes.io/docs/concepts/services-networking/service/)
 - [Documentation Kubernetes - Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
 - [Documentation Kubernetes - ConfigMaps](https://kubernetes.io/docs/concepts/configuration/configmap/)
+
+## Licence & Mention SUPINFO
+
+Ce dépôt fait partie d’un **mini-projet pédagogique SUPINFO** réalisé dans le cadre du module *4KUBE – Kubernetes*.
+
+- Usage autorisé : apprentissage, tests, révisions, projets étudiants.
+- Toute réutilisation publique (GitHub, blog, portfolio, etc.) doit **mentionner l’auteur** et **le contexte SUPINFO**.
+- Ce projet n’engage ni **SUPINFO** ni les enseignants, et n’est pas destiné à un usage en production.
+
+© Projet étudiant SUPINFO (Master Architecture Cloud, Systèmes & Réseaux).
